@@ -4,6 +4,15 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { AppError, hash } from './input.mjs';
 
+function canonicalSourceUrl(value) {
+  const url = new URL(value);
+  url.hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
+  url.pathname = url.pathname.replace(/\/+$/, '') || '';
+  for (const key of [...url.searchParams.keys()]) if (/^utm_|^(gclid|fbclid)$/i.test(key)) url.searchParams.delete(key);
+  url.search = new URLSearchParams([...url.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b))).toString();
+  return url.href;
+}
+
 export class Store {
   constructor(path) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -62,29 +71,34 @@ export class Store {
 
   enqueue(input) {
     return this.transaction(() => {
+      const sourceUrl = input.type === 'text' ? '' : canonicalSourceUrl(input.url);
       const identity =
         input.type === 'text'
           ? `text:${hash(`${input.url || ''}\n${input.content}`)}`
-          : `${input.type}:${input.url}${input.sessionId ? `\nsession:${input.sessionId}` : ''}`;
+          : `${input.type}:${sourceUrl}${input.sessionId ? `\nsession:${input.sessionId}` : ''}`;
       const now = new Date().toISOString();
-      this.db
-        .prepare(
-          `INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(identity) DO UPDATE SET title=excluded.title,input_json=excluded.input_json`,
-        )
-        .run(
-          randomUUID(),
-          identity,
-          input.type,
-          input.title || input.url,
-          input.url,
-          JSON.stringify(input),
-          now,
+      let source = this.db.prepare('SELECT id,identity FROM sources WHERE identity=?').get(identity);
+      if (!source && input.type !== 'text') {
+        const candidates = this.db.prepare('SELECT id,identity,url,input_json FROM sources WHERE type=? AND url IS NOT NULL').all(input.type);
+        source = candidates.find(candidate => {
+          try {
+            const previous = JSON.parse(candidate.input_json);
+            return (previous.sessionId || '') === (input.sessionId || '') && canonicalSourceUrl(candidate.url) === sourceUrl;
+          } catch { return false; }
+        });
+      }
+      if (source) {
+        this.db.prepare('UPDATE sources SET title=?,input_json=? WHERE id=?').run(input.title || input.url, JSON.stringify(input), source.id);
+      } else {
+        const id = randomUUID();
+        this.db.prepare('INSERT INTO sources VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          id, identity, input.type, input.title || input.url, input.url, JSON.stringify(input), now,
         );
-      const source = this.db.prepare('SELECT id FROM sources WHERE identity=?').get(identity);
+        source = { id, identity };
+      }
       const active = this.db
         .prepare("SELECT id FROM jobs WHERE source_id=? AND status IN ('queued','running')")
-        .get(source.id);
+      .get(source.id);
       if (active) return { ...this.job(active.id), reused: true };
       const id = randomUUID();
       this.db
@@ -222,7 +236,8 @@ export class Store {
       const existing = this.db
         .prepare('SELECT id FROM documents WHERE content_hash=?')
         .get(contentHash);
-      const originUrl = article.url || resource.url || '';
+      const rawOriginUrl = article.url || resource.url || '';
+      const originUrl = rawOriginUrl ? (() => { try { return canonicalSourceUrl(rawOriginUrl); } catch { return rawOriginUrl; } })() : '';
       const previous = this.db
         .prepare('SELECT document_id,metadata_json FROM origins WHERE source_id=? AND url=?')
         .get(sourceId, originUrl);

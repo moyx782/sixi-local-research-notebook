@@ -31,6 +31,14 @@ export function candidateUrl(value) {
   for(const key of [...url.searchParams.keys()])if(/^utm_|^(gclid|fbclid)$/i.test(key))url.searchParams.delete(key);
   return url.href;
 }
+export function sourceUrlKey(value) {
+  const url=new URL(normalizeUrl(value));
+  url.hostname=url.hostname.replace(/^www\./i,'').toLowerCase();
+  url.pathname=url.pathname.replace(/\/+$/,'')||'';
+  for(const key of [...url.searchParams.keys()])if(/^utm_|^(gclid|fbclid)$/i.test(key))url.searchParams.delete(key);
+  url.search=new URLSearchParams([...url.searchParams.entries()].sort(([a],[b])=>a.localeCompare(b))).toString();
+  return url.href;
+}
 export function rankCandidates(candidates,project,limit,{maxPerDomain=3,preferLongform=false}={}) {
   const tokens=[...new Set((`${project.objectName} ${project.scope?.market||''} ${project.scope?.segments||''}`).toLowerCase().match(/[a-z\d]{3,}|[\p{Script=Han}]{2,}/gu)||[])];
   const ranked=candidates.filter(c=>!irrelevantReason(c,project)).map((c,index)=>{
@@ -108,6 +116,19 @@ export class Discovery {
     });
   }
   human(run,input){try{this.handoffs?.create(run.projectId,input);}catch{run.warnings.push('部分人工补采任务未创建，请在人工补采区手动添加。');}}
+  history(projectId){
+    const project=this.research.get(projectId),sourceIds=new Set(project.sourceIds||[]),documentIds=new Set([...(project.documentIds||[]),...(project.evidence||[]).map(item=>item.documentId)]),urls=new Set();
+    const activeRows=this.store.db.prepare("SELECT source_id FROM jobs WHERE status IN ('queued','running')").all();
+    const activeSources=new Set(activeRows.map(row=>row.source_id));
+    const rows=this.store.db.prepare('SELECT s.id,s.url,o.url AS origin_url,o.document_id FROM sources s LEFT JOIN origins o ON o.source_id=s.id').all();
+    for(const row of rows){
+      const belongs=sourceIds.has(row.id)||documentIds.has(row.document_id);
+      if(!belongs&&!activeSources.has(row.id))continue;
+      if(row.url)try{urls.add(sourceUrlKey(row.url));}catch{}
+      if(row.origin_url)try{urls.add(sourceUrlKey(row.origin_url));}catch{}
+    }
+    return {urls};
+  }
   handoffFailures(run){
     for(const item of this.progress(run).selected.filter(s=>!s.handoffCreated&&['failed','partial'].includes(s.collectionStatus))){
       this.human(run,{title:`补采：${item.title.slice(0,200)}`,url:item.url,reason:`自动正文采集未完成：${item.error||'部分内容不可用'}。请自行打开页面；如需登录，由你完成后截图或摘录。`,dedupeKey:`source:${item.sourceId}`});
@@ -154,7 +175,13 @@ export class Discovery {
       this.ensureCurrent(run,signal);
       if(!run.selected.length){
         run.excluded=run.candidates.filter(c=>irrelevantReason(c,run.brief)).map(c=>({url:c.url,title:c.title,reason:irrelevantReason(c,run.brief)}));
-        const eligible=run.candidates.filter(c=>!irrelevantReason(c,run.brief));
+        const history=this.history(run.projectId),eligible=[];
+        for(const candidate of run.candidates.filter(c=>!irrelevantReason(c,run.brief))){
+          let key='';try{key=sourceUrlKey(candidate.url);}catch{}
+          if(key&&history.urls.has(key)){run.reusedCount=(run.reusedCount||0)+1;run.excluded.push({url:candidate.url,title:candidate.title,reason:'本研究已经采集过该来源，已跳过重复下载。'});continue;}
+          eligible.push(candidate);
+        }
+        if(run.reusedCount)run.warnings.push(`本轮跳过 ${run.reusedCount} 个本研究已经采集过的来源，未重复下载。`);
         let selected=rankCandidates(eligible,run.brief,run.maxSources,{maxPerDomain:profile.maxPerDomain,preferLongform:run.depth==='deep'});run.phase='selecting';this.save(run);
         if(selected.length&&run.useAI&&await this.aiAvailable()){
           try{
@@ -179,8 +206,10 @@ export class Discovery {
       this.ensureCurrent(run,signal);
       this.handoffFailures(run);
       const counts=this.progress(run).counts;
-      run.status=!counts.completed?'failed':counts.failed||run.queries.some(q=>q.status==='failed')?'partial':'completed';
-      if(!run.selected.length){run.warnings.push('未找到可自动采集的相关网页，已保留检索记录，可继续人工补采。');this.human(run,{title:'补充研究资料',reason:`研究问题：${run.brief.question}。自动检索未找到可采集网页，请人工搜集并提交出处、文字或截图。`,dedupeKey:`empty:${run.scopeSignature}`});}
+      const noNewSources=!run.selected.length&&(run.reusedCount||run.candidates.length&&!run.excluded.length);
+      run.status=!counts.completed?(run.reusedCount&&!run.queries.some(q=>q.status==='failed')?'completed':'failed'):counts.failed||run.queries.some(q=>q.status==='failed')?'partial':'completed';
+      if(!run.selected.length&&!run.reusedCount){run.warnings.push('未找到可自动采集的相关网页，已保留检索记录，可继续人工补采。');this.human(run,{title:'补充研究资料',reason:`研究问题：${run.brief.question}。自动检索未找到可采集网页，请人工搜集并提交出处、文字或截图。`,dedupeKey:`empty:${run.scopeSignature}`});}
+      if(noNewSources&&!run.warnings.some(w=>w.includes('未重复下载')))run.warnings.push('本轮没有新的来源需要下载。');
       run.phase='done';run.finishedAt=now();this.save(run);
     }catch(error){
       const current=this.get(run.id);if(current.status==='cancelled')return;

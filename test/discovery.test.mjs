@@ -45,6 +45,15 @@ test('deep discovery expands query coverage and supports a custom material count
  const run=(await f.call(f.path)).discovery;assert.equal(run.status,'completed');assert.equal(run.depth,'deep');assert.equal(run.maxSources,20);assert.equal(run.queries.length,9);assert.equal(searches,9);assert.equal(run.candidates.length,90);assert.equal(run.selected.length,20);assert.equal(run.counts.completed,20);
 });
 
+test('a second discovery round skips the same collected URL without enqueueing another job',async t=>{
+ const f=await fixture(t,{search:async()=>({provider:'Fixture',items:[item('https://source.example/repeated')]})});
+ await f.call(f.path+'/discover',{depth:'standard',maxSources:1,useAI:false});await f.app.discovery.running;await f.app.collector.running;
+ const firstJobs=f.app.store.db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n;
+ await f.call(f.path+'/discover',{depth:'standard',maxSources:1,useAI:false});await f.app.discovery.running;await f.app.collector.running;
+ const detail=await f.call(f.path),run=detail.discovery;
+ assert.equal(run.status,'completed');assert.equal(run.selected.length,0);assert.equal(run.reusedCount,1);assert.equal(f.app.store.db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n,firstJobs);assert.equal(detail.documents.length,1);
+});
+
 test('automatic discovery continues after search/login failures, deduplicates sources, and makes independent human tasks',async t=>{
  let searches=0,releaseFirst;const f=await fixture(t,{
    search:async()=>{searches++;if(searches===1){await new Promise(resolve=>{releaseFirst=resolve;});throw new Error('Search verification needed');}return {provider:'Fixture',items:[item('https://example.com/login'),item('https://example.com/public?utm_source=test'),item('https://example.com/public'),item('http://127.0.0.1/private'),item('https://example.com/catalog.pdf')]};},
@@ -60,7 +69,7 @@ test('automatic discovery continues after search/login failures, deduplicates so
  assert.ok(detail.handoffs.some(t=>t.url.includes('/login')));assert.ok(detail.handoffs.some(t=>t.url.endsWith('.pdf')));
  assert.equal(detail.project.evidence.length,0,'collection never fabricates evidence or findings');
  await f.call(f.path+'/discover',{useAI:false});await f.app.discovery.running;
- const next=await f.call(f.path);assert.ok(next.discovery.selected.some(s=>s.reused));assert.equal(next.handoffs.length,3,'open human tasks do not duplicate');
+ const next=await f.call(f.path);assert.ok(next.discovery.reusedCount>=1);assert.equal(next.discovery.selected.some(s=>s.url.endsWith('/public')),false,'a completed URL is not collected again');assert.equal(next.handoffs.length,3,'open human tasks do not duplicate');
 });
 
 test('invalid AI plans or invented candidate URLs fall back to rule search and selection',async t=>{

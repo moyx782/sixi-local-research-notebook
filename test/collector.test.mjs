@@ -25,6 +25,9 @@ test('deduplication shares content without losing provenance; changed URLs get n
     assert.equal(first.result.created, 1);
     const repeated = await collect(store, collector, { type: 'url', url: 'https://example.com/a' });
     assert.equal(repeated.result.unchanged, 1);
+    const canonicalRepeat = await collect(store, collector, { type: 'url', url: 'https://www.example.com/a/?utm_source=research' });
+    assert.equal(canonicalRepeat.result.unchanged, 1);
+    assert.equal(store.sources({ limit: 20, offset: 0 }).total, 1, 'tracking, www and trailing slash variants reuse one source');
     const alias = await collect(store, collector, { type: 'url', url: 'https://example.com/b' });
     assert.equal(alias.result.duplicate, 1);
     assert.equal(store.document(id).origins.length, 2);
