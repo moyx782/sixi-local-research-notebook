@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { cp, mkdir, readFile, rename, writeFile, access, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
@@ -15,6 +15,28 @@ const installDir = join(homedir(), 'Library', 'Application Support', 'Sixi', 'ba
 const logDir = join(homedir(), 'Library', 'Logs', 'Sixi');
 const plistPath = join(homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
 const statePath = join(installDir, 'active.json');
+
+function lanAddresses() {
+  const addresses = [];
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (!entry.internal && entry.family === 'IPv4' && entry.address && isLanIPv4(entry.address)) addresses.push(entry.address);
+    }
+  }
+  return [...new Set(addresses)];
+}
+
+function isLanIPv4(address) {
+  const parts = address.split('.').map(Number);
+  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) &&
+    (parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
+}
+
+function serviceUrls(port, bindHost) {
+  if (bindHost === '0.0.0.0' || bindHost === '::') return lanAddresses().map((address) => `http://${address}:${port}`);
+  const display = bindHost.includes(':') && !bindHost.startsWith('[') ? `[${bindHost}]` : bindHost;
+  return [`http://${display}:${port}`];
+}
 
 function run(command, args, { cwd = root, output = false, allowFailure = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -122,9 +144,11 @@ async function deploy() {
   if (!Number.isInteger(port) || port < 1024 || port > 65535)
     throw new Error('PORT 必须在 1024–65535 之间');
   const dataDir = resolve(process.env.SIXI_DATA_DIR || join(homedir(), '.sixi'));
+  const previousState = backendOnly ? JSON.parse(await readFile(statePath, 'utf8')) : null;
+  const bindHost = process.env.SIXI_BIND_HOST || previousState?.bindHost || '127.0.0.1';
   const releaseId = new Date().toISOString().replace(/[-:.]/g, '') + `-${process.pid}`;
   const releaseDir = join(installDir, 'releases', releaseId);
-  const assetsRoot = backendOnly ? JSON.parse(await readFile(statePath, 'utf8')).releaseDir : root;
+  const assetsRoot = backendOnly ? previousState.releaseDir : root;
   const hadService = await loaded();
   if (!hadService && (await portOccupied(port)))
     throw new Error(`端口 ${port} 被未托管的进程占用；先确认并停止旧服务，再部署。`);
@@ -176,6 +200,7 @@ async function deploy() {
 <key>EnvironmentVariables</key><dict>
 <key>NODE_ENV</key><string>production</string><key>PORT</key><string>${port}</string>
 <key>SIXI_DATA_DIR</key><string>${xml(dataDir)}</string>
+<key>SIXI_BIND_HOST</key><string>${xml(bindHost)}</string>
 <key>SIXI_AUTH_REQUIRED</key><string>${xml(process.env.SIXI_AUTH_REQUIRED || '1')}</string>
 <key>SIXI_DNS_FALLBACK</key><string>${xml(process.env.SIXI_DNS_FALLBACK || 'on')}</string>
 <key>PATH</key><string>${xml(dirname(process.execPath))}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
@@ -197,6 +222,8 @@ async function deploy() {
       service,
       releaseDir,
       port,
+      bindHost,
+      urls: serviceUrls(port, bindHost),
       dataDir,
       plistPath,
       logDir,
@@ -237,7 +264,9 @@ try {
           service,
           loaded: running,
           releaseDir: state.releaseDir,
-          url: `http://127.0.0.1:${state.port}`,
+          bindHost: state.bindHost || '127.0.0.1',
+          url: serviceUrls(state.port, state.bindHost || '127.0.0.1')[0] || `http://127.0.0.1:${state.port}`,
+          urls: serviceUrls(state.port, state.bindHost || '127.0.0.1'),
           health: running ? await healthy(state.port) : null,
         },
         null,

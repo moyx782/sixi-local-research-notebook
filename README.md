@@ -21,7 +21,7 @@ npm run check
 
 启用认证后首次打开页面创建管理员（密码至少 10 位），再在设置中添加研究成员。`npm start` 未设置 `SIXI_AUTH_REQUIRED=1` 时为本机开发免登录模式；`deploy:local` 默认启用认证。
 
-服务默认监听 `127.0.0.1:4173`。`PORT` 可覆盖端口；`SIXI_DATA_DIR` 可覆盖数据目录，默认 `~/.sixi`。采集数据保存到 `library.sqlite`，原有 AI 配置仍在 `config.json`。同一个数据目录只运行一个后端进程。
+服务默认监听 `127.0.0.1:4173`。需要局域网访问时部署前设置 `SIXI_BIND_HOST=0.0.0.0`，服务会监听本机网卡并在状态中列出局域网地址；`PORT` 可覆盖端口；`SIXI_DATA_DIR` 可覆盖数据目录，默认 `~/.sixi`。采集数据保存到 `library.sqlite`，原有 AI 配置仍在 `config.json`。同一个数据目录只运行一个后端进程。
 
 ## 本机后台部署（macOS）
 
@@ -40,7 +40,7 @@ npm run service:start
 - 日志：`~/Library/Logs/Sixi/stdout.log`、`stderr.log`
 - 部署前资料库备份：`~/.sixi/backups/`（数据目录可通过 `SIXI_DATA_DIR` 更改）
 
-资料库与 AI 密钥不复制到代码版本目录，继续使用原数据目录。默认端口是 4173，仅监听本机。浏览器使用 `http://127.0.0.1:4173`，不再允许 `file://` 的 `Origin: null` 访问接口。数据库目录通过操作系统自动释放的 SQLite 排他锁限制为单实例，重复启动不会重置正在运行的任务。
+资料库与 AI 密钥不复制到代码版本目录，继续使用原数据目录。默认端口是 4173，默认仅监听本机；局域网模式会允许当前机器网卡地址的 Host/Origin，并继续要求登录。浏览器使用 `http://127.0.0.1:4173` 或状态命令列出的局域网 URL，不再允许 `file://` 的 `Origin: null` 访问接口。数据库目录通过操作系统自动释放的 SQLite 排他锁限制为单实例，重复启动不会重置正在运行的任务。
 
 正式部署会复制完整 `frontend/` 模块和静态入口。
 
@@ -64,7 +64,7 @@ SIXI_SMOKE_BASE_URL=http://127.0.0.1:4173 npm run test:live
 
 以下 HTTP 示例在开发免登录模式下可直接执行；认证部署须使用已登录浏览器，或在本机脚本中读取该令牌并用 Authorization Bearer 请求。切勿将令牌写入源码、URL 或 shell 历史。
 
-该认证面向本机原型；仍只绑定 loopback，保留 Host/Origin 限制。外部部署尚未完成，未来需单独配置 HTTPS、域名、反向代理、Secure Cookie、账号恢复和部署平台。
+该认证面向受信任的本地或局域网原型；局域网模式只允许当前网卡地址的 Host/Origin，仍要求登录。公网部署尚未完成，未来需单独配置 HTTPS、域名、反向代理、Secure Cookie、账号恢复和部署平台。
 
 ## 研究接口
 

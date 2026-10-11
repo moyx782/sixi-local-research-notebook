@@ -4,10 +4,10 @@
 
 ## 当前部署
 
-- 类型：macOS 用户级 launchd 服务，仅本机访问。
+- 类型：macOS 用户级 launchd 服务；默认本机访问，可选局域网访问。
 - 服务：`gui/501/com.sixi.backend`。
-- 地址：[http://127.0.0.1:4173](http://127.0.0.1:4173)。
-- 健康接口：[http://127.0.0.1:4173/api/health](http://127.0.0.1:4173/api/health)。
+- 默认地址：[http://127.0.0.1:4173](http://127.0.0.1:4173)。局域网部署时使用 `SIXI_BIND_HOST=0.0.0.0 npm run deploy:local`，再通过 `npm run service:status` 查看当前网卡 URL。
+- 健康接口：[http://127.0.0.1:4173/api/health](http://127.0.0.1:4173/api/health)；局域网设备将端口替换为状态命令列出的地址。
 - 部署目录：`/Users/yxmo/Library/Application Support/Sixi/backend/releases/20260919T080847117Z-3801`。
 - 启动配置：`/Users/yxmo/Library/LaunchAgents/com.sixi.backend.plist`。
 - 数据目录：`/Users/yxmo/.sixi`。

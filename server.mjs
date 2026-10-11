@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store } from './backend/store.mjs';
 import { Collector } from './backend/collector.mjs';
@@ -69,6 +70,23 @@ function json(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function hostNames(bindHost) {
+  const names = new Set(['localhost', '127.0.0.1', '[::1]']);
+  const configured = String(bindHost || '127.0.0.1').replace(/^\[|\]$/g, '').toLowerCase();
+  if (configured !== '0.0.0.0' && configured !== '::') names.add(configured.includes(':') ? `[${configured}]` : configured);
+  else for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.address) names.add(entry.family === 'IPv6' ? `[${entry.address}]` : entry.address.toLowerCase());
+    }
+  }
+  return names;
+}
+
+function allowedHost(value, port, names) {
+  const host = String(value || '').toLowerCase().replace(/\.$/, '');
+  return [...names].some((name) => host === name || host === `${name}:${port}`);
+}
+
 export function createApp({
   dataDir = process.env.SIXI_DATA_DIR || join(homedir(), '.sixi'),
   fetcher,
@@ -79,6 +97,7 @@ export function createApp({
   mineruOptions,
   searchOptions,
   visualOptions,
+  bindHost = '127.0.0.1',
   authRequired = process.env.SIXI_AUTH_REQUIRED === '1',
 } = {}) {
   // Acquire before opening the library or recovering jobs: a second process
@@ -88,7 +107,7 @@ export function createApp({
   try {
     store = new Store(join(dataDir, 'library.sqlite'));
     const sessions = new CookieSessions(store, vault || new MacKeychain(hash(realpathSync(dataDir))));
-    return createLockedApp({ dataDir, store, sessions, fetcher: fetcher || createFetcher({ sessions }), instanceLock, ask, authRequired, modelConnection, discoveryOptions, mineruOptions, searchOptions, visualOptions });
+    return createLockedApp({ dataDir, store, sessions, fetcher: fetcher || createFetcher({ sessions }), instanceLock, ask, authRequired, modelConnection, discoveryOptions, mineruOptions, searchOptions, visualOptions, bindHost });
   } catch (error) {
     try {
       store?.close();
@@ -99,7 +118,7 @@ export function createApp({
   }
 }
 
-function createLockedApp({ dataDir, store, sessions, fetcher, instanceLock, ask, authRequired, modelConnection, discoveryOptions, mineruOptions, searchOptions, visualOptions }) {
+function createLockedApp({ dataDir, store, sessions, fetcher, instanceLock, ask, authRequired, modelConnection, discoveryOptions, mineruOptions, searchOptions, visualOptions, bindHost }) {
   const collector = new Collector(store, fetcher);
   const assistant = createAssistant(dataDir, { connection: modelConnection });
   const research = new Research(store, ask || assistant.ask);
@@ -115,15 +134,17 @@ function createLockedApp({ dataDir, store, sessions, fetcher, instanceLock, ask,
     aiAvailable:async()=>Boolean((await assistant.readConfig()).apiKey),...discoveryOptions,handoffs,
   });
   const auth = new Authentication(store, { enabled: authRequired, dataDir, secureCookie: process.env.SIXI_SECURE_COOKIE === '1' });
+  const allowedHosts = hostNames(bindHost);
   const server = http.createServer(async (req, res) => {
     try {
-      if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.headers.host || ''))
+      if (!allowedHost(req.headers.host, req.socket.localPort, allowedHosts))
         throw new AppError('Host 不受支持', 403, 'FORBIDDEN');
       const origin = req.headers.origin;
       const allowed = [
         `http://127.0.0.1:${req.socket.localPort}`,
         `http://localhost:${req.socket.localPort}`,
         `http://[::1]:${req.socket.localPort}`,
+        ...[...allowedHosts].filter((host) => !['localhost', '127.0.0.1', '[::1]'].includes(host)).map((host) => `http://${host}:${req.socket.localPort}`),
       ];
       if (origin && !allowed.includes(origin)) throw new AppError('来源不受支持', 403, 'FORBIDDEN');
       if (origin) {
@@ -235,7 +256,8 @@ function createLockedApp({ dataDir, store, sessions, fetcher, instanceLock, ask,
 export function startServer({ port = Number(process.env.PORT || 4173), ...options } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new AppError('PORT 必须是 0–65535 之间的整数');
-  const app = createApp(options);
+  const bindHost = options.bindHost || process.env.SIXI_BIND_HOST || '127.0.0.1';
+  const app = createApp({ ...options, bindHost });
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
@@ -254,8 +276,8 @@ export function startServer({ port = Number(process.env.PORT || 4173), ...option
   });
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  app.server.listen(port, '127.0.0.1', () =>
-    console.log(`思绪后端：http://127.0.0.1:${app.server.address().port}`),
+  app.server.listen(port, bindHost, () =>
+    console.log(`思绪后端：http://${bindHost}:${app.server.address().port}`),
   );
   return app;
 }
