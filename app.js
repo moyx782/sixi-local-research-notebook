@@ -207,9 +207,9 @@ document.addEventListener('submit',event=>{
   } else if(form.id==='handoffForm') {
    await request(path('handoffs'),{method:'POST',body:Object.fromEntries(data)});modal.close();await refresh();toast('人工任务已创建，不影响后台采集。');
   } else if(form.id==='handoffCaptureForm') {
-   const input=Object.fromEntries(data);delete input.screenshot;input.action='complete';input.attachToProject=data.has('attachToProject');
-   const file=data.get('screenshot');if(file?.size){if(file.size>5_000_000)throw new Error('截图不能超过 5 MB');input.screenshot={base64:await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('截图读取失败'));reader.readAsDataURL(file);})};}
-   await request(path('handoffs/'+form.dataset.id),{method:'POST',body:input});modal.close();await refresh();toast(input.attachToProject?'文字与截图已保存到资料库，并加入当前研究。':'文字与截图已直接保存到资料库。');
+   const input=Object.fromEntries(data);delete input.attachment;input.action='complete';input.attachToProject=data.has('attachToProject');
+   const file=data.get('attachment');if(file?.size){if(file.size>5_000_000)throw new Error('附件不能超过 5 MB');input.attachment={filename:file.name,base64:await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('附件读取失败'));reader.readAsDataURL(file);})};}
+   await request(path('handoffs/'+form.dataset.id),{method:'POST',body:input});modal.close();await refresh();toast(input.attachToProject?'补采文字与附件已保存到资料库，并加入当前研究。':'补采文字与附件已直接保存到资料库。');
   } else if(form.id==='libraryUploadForm') {
    const input=Object.fromEntries(data);delete input.file;const file=data.get('file');
    if(file?.size){if(file.size>5_000_000)throw new Error('文件不能超过 5 MB');input.filename=file.name;input.base64=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('文件读取失败'));reader.readAsDataURL(file);});}

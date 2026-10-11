@@ -21,7 +21,7 @@
 | `backend/assistant.mjs` | 保持已有配置与上下文 AI 问答接口 |
 | `backend/model-connection.mjs` | 显式协议与 Endpoint 的模型传输边界：Chat Completions / Anthropic Messages |
 | `backend/discovery.mjs` | 持久化自动检索任务、规则/AI 规划筛选、采集队列协调与重启恢复 |
-| `backend/handoffs.mjs` | 不阻塞自动采集的人工补采任务，负责人、截图、出处和文字记录 |
+| `backend/handoffs.mjs` | 不阻塞自动采集的人工补采任务，负责人、文件或截图、出处和文字记录 |
 | `backend/mineru.mjs` | MinerU 官方云适配器、独立 Token 配置、受限 ZIP Markdown 读取 |
 | `backend/upload-parser.mjs` | 持久化上传解析状态、远程批次恢复、重试与入库衔接 |
 | `backend/uploads.mjs` | 无项目依赖的资料库上传，原文件与图片保留及认证下载 |

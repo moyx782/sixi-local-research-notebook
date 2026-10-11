@@ -104,6 +104,20 @@ test('human handoffs store screenshot plus attributed text, enforce project owne
  await f.restart();assert.equal((await f.call(f.path)).handoffs[0].hasScreenshot,true);assert.equal((await fetch(f.base+doc.attachments[0].url)).status,200);
 });
 
+test('human handoffs accept document attachments and keep the original in the library',async t=>{
+ const f=await fixture(t,{search:async()=>({items:[]})});
+ const created=await f.call(f.path+'/handoffs',{title:'Download the product brief',url:'https://example.com/brief',reason:'The public page requires a human download.'});
+ const id=created.task.id;
+ const original='# Product brief\n\nThe manufacturer describes an industrial motor application.';
+ const completed=await f.call(f.path+'/handoffs/'+id,{action:'complete',parser:'local',attachment:{filename:'product-brief.md',base64:Buffer.from(original).toString('base64')},content:'Downloaded by a researcher.'});
+ assert.equal(completed.status,200);assert.equal(completed.task.attachmentKind,'text');assert.equal(completed.task.attachmentFilename,'product-brief.md');
+ await f.app.collector.running;
+ const detail=await f.call(f.path);assert.equal(detail.documents.length,1);assert.ok(detail.project.sourceIds.includes(completed.task.sourceId));
+ const doc=(await f.call('/api/documents/'+detail.documents[0].id)).document;assert.match(doc.text,/Product brief/);assert.equal(doc.attachments[0].kind,'text');
+ const file=await fetch(f.base+doc.attachments[0].downloadUrl);assert.equal(file.status,200);assert.equal(await file.text(),original);
+ await f.restart();const after=(await f.call(f.path)).handoffs[0];assert.equal(after.attachmentFilename,'product-brief.md');assert.equal((await fetch(f.base+doc.attachments[0].downloadUrl)).status,200);
+});
+
 test('files and screenshots upload directly to the library with originals retained and no project attachment required',async t=>{
  const f=await fixture(t,{search:async()=>({items:[]})});
  const text='# Public source\n\nA manufacturer describes battery-powered applications.';

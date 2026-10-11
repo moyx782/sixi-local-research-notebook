@@ -19,6 +19,15 @@ export function screenshot(input) {
   return { bytes, mime };
 }
 
+function attachment(input) {
+  if (input === undefined || input === null) return null;
+  if (!input || typeof input !== 'object' || typeof input.filename !== 'string' || typeof input.base64 !== 'string')
+    throw new AppError('附件格式无效');
+  if (!input.filename.trim() || input.filename.length > 250 || /[\r\n\u0000/\\]/.test(input.filename))
+    throw new AppError('附件文件名无效');
+  return { filename: input.filename, base64: input.base64 };
+}
+
 export class Handoffs {
   constructor(store, research, collector) {
     this.store=store;this.research=research;this.collector=collector;
@@ -42,23 +51,36 @@ export class Handoffs {
   }
   async complete(id,input) {
     const task=this.get(id);if(task.status!=='open')throw new AppError('此任务已经处理',409);
-    const caption=text(input.content||'',450000,'补采文字',input.parser!=='mineru'),image=screenshot(input.screenshot);
+    const file=attachment(input.attachment),image=screenshot(input.screenshot);
+    const imageFile=file&&/\.(png|jpe?g|webp)$/i.test(file.filename);
+    const caption=text(input.content||'',450000,'补采文字',input.parser!=='mineru'&&(!file||imageFile));
     const url=input.url?normalizeUrl(input.url):task.url;
     const assignee=text(input.assignee||task.assignee||'',100,'负责人');
     const title=text(input.title||task.title,300,'资料标题',true);
+    const attachToProject=input.attachToProject!==false;
+    const notes=`人工补采记录人：${assignee||'未署名'}${url?`\n原始来源：${url}`:''}${caption?`\n\n${caption}`:''}`;
+    if(file){
+      if(!this.uploads)throw new AppError('资料上传服务未配置',503);
+      const result=await this.uploads.upload({parser:input.parser==='mineru'?'mineru':'local',filename:file.filename,base64:file.base64,title,url,content:notes},{projectId:attachToProject?task.projectId:undefined});
+      if(result.job&&attachToProject)this.research.mutate(task.projectId,p=>{if(!p.sourceIds.includes(result.job.sourceId))p.sourceIds.push(result.job.sourceId);});
+      const saved={...task,title,url,assignee,status:'completed',uploadId:result.upload.id,sourceId:result.job?.sourceId||null,jobId:result.job?.id||null,hasScreenshot:result.upload.kind==='image',attachmentFilename:result.upload.filename,attachmentKind:result.upload.kind,parser:result.upload.parser||'local',attachedToProject:attachToProject,completedAt:now()};
+      this.save(saved);
+      if(result.job)this.collector.kick();
+      return {task:this.get(id),...result};
+    }
     if(input.parser==='mineru'){
       if(!image)throw new AppError('请选择要交给 MinerU 识别的截图');
       if(caption.length>4500)throw new AppError('MinerU 补充说明最多 4500 字');
       const ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[image.mime];
-      const result=await this.uploads.upload({parser:'mineru',filename:`capture.${ext}`,base64:input.screenshot.base64,title,url,content:`人工补采记录人：${assignee||'未署名'}\n${caption}`},{projectId:input.attachToProject!==false?task.projectId:undefined});
-      this.save({...task,title,url,assignee,status:'completed',uploadId:result.upload.id,hasScreenshot:true,attachedToProject:input.attachToProject!==false,completedAt:now()});
+      const result=await this.uploads.upload({parser:'mineru',filename:`capture.${ext}`,base64:input.screenshot.base64,title,url,content:notes},{projectId:attachToProject?task.projectId:undefined});
+      this.save({...task,title,url,assignee,status:'completed',uploadId:result.upload.id,hasScreenshot:true,attachmentFilename:result.upload.filename,attachmentKind:'image',parser:'mineru',attachedToProject:attachToProject,completedAt:now()});
       return {task:this.get(id),...result};
     }
     const content=`【人工补采记录${image?' · 附截图':''}】\n记录时间：${now()}\n${assignee?`记录人：${assignee}\n`:''}${url?`原始来源：${url}\n`:''}\n${caption}\n\n说明：以上文字由用户填写${image?'，截图作为核对材料保存，系统未执行 OCR':''}；仍需核实出处与内容。`;
     const job=this.store.enqueue(collectionInput({type:'text',title,content,...(url?{url}:{})}));
-    if(input.attachToProject!==false)this.research.mutate(task.projectId,p=>{if(!p.sourceIds.includes(job.sourceId))p.sourceIds.push(job.sourceId);});
+    if(attachToProject)this.research.mutate(task.projectId,p=>{if(!p.sourceIds.includes(job.sourceId))p.sourceIds.push(job.sourceId);});
     if(image)this.store.db.prepare('INSERT INTO research_screenshots VALUES (?,?,?)').run(task.id,image.mime,image.bytes);
-    this.save({...task,title,url,assignee,status:'completed',sourceId:job.sourceId,jobId:job.id,hasScreenshot:Boolean(image),attachedToProject:input.attachToProject!==false,completedAt:now()});
+    this.save({...task,title,url,assignee,status:'completed',sourceId:job.sourceId,jobId:job.id,hasScreenshot:Boolean(image),attachedToProject:attachToProject,completedAt:now()});
     this.collector.kick();return {task:this.get(id),job};
   }
   update(id,input) {
