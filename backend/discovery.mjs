@@ -115,7 +115,25 @@ export class Discovery {
       Promise.resolve().then(()=>{combined.throwIfAborted();return this.ask(input,{signal:combined});}).then(resolve,reject).finally(()=>combined.removeEventListener('abort',abort));
     });
   }
-  human(run,input){try{this.handoffs?.create(run.projectId,input);}catch{run.warnings.push('部分人工补采任务未创建，请在人工补采区手动添加。');}}
+  human(run,input){
+    try {
+      if (!this.handoffs) return;
+      const key=`auto:${run.projectId}:${run.scopeSignature}`;
+      const tasks=this.handoffs.list(run.projectId);
+      const existing=tasks.find(task=>task.status==='open'&&(task.dedupeKey===key||task.dedupeKey===`legacy-auto:${run.projectId}`));
+      const marker=input.url||`【${input.title}】`;
+      if(existing){
+        if(existing.reason.includes(marker)) return existing;
+        const addition=`【${input.title}】${input.url?`\n来源：${input.url}`:''}\n${input.reason}`;
+        existing.reason=`${existing.reason}\n\n${addition}`.slice(0,2000);
+        existing.title='自动采集待补充资料（已合并多项）';
+        existing.url='';
+        existing.dedupeKey=key;
+        return this.handoffs.save(existing);
+      }
+      return this.handoffs.create(run.projectId,{...input,title:input.title,dedupeKey:key});
+    } catch { run.warnings.push('人工补采任务未创建；失败详情已保留在自动搜集记录中。'); }
+  }
   history(projectId){
     const project=this.research.get(projectId),sourceIds=new Set(project.sourceIds||[]),documentIds=new Set([...(project.documentIds||[]),...(project.evidence||[]).map(item=>item.documentId)]),urls=new Set();
     const activeRows=this.store.db.prepare("SELECT source_id FROM jobs WHERE status IN ('queued','running')").all();
@@ -130,10 +148,18 @@ export class Discovery {
     return {urls};
   }
   handoffFailures(run){
-    for(const item of this.progress(run).selected.filter(s=>!s.handoffCreated&&['failed','partial'].includes(s.collectionStatus))){
-      this.human(run,{title:`补采：${item.title.slice(0,200)}`,url:item.url,reason:`自动正文采集未完成：${item.error||'部分内容不可用'}。请自行打开页面；如需登录，由你完成后截图或摘录。`,dedupeKey:`source:${item.sourceId}`});
+    for(const item of this.progress(run).selected.filter(s=>!s.handoffCreated&&this.needsHumanHandoff(s))){
+      this.human(run,{title:`补采：${item.title.slice(0,200)}`,url:item.url,reason:`自动正文采集未完成：${item.error||'未获取到可验证正文'}。请自行打开页面；如需登录，由你完成后截图或摘录。`});
       run.selected.find(s=>s.url===item.url).handoffCreated=true;this.save(run);
     }
+  }
+  needsHumanHandoff(item){
+    const job=item.jobId?this.store.job(item.jobId):null;
+    if(!job) return false;
+    if(job.status==='failed') return true;
+    if(job.status!=='partial') return false;
+    const result=job.result||{};
+    return !(result.created||result.updated||result.duplicate||result.unchanged);
   }
   async run(run,signal){
     try{

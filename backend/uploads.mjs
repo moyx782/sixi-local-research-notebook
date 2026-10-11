@@ -35,7 +35,15 @@ export class LibraryUploads {
         if(!content.trim())throw new AppError('文本文件不能为空');mime='text/plain; charset=utf-8';kind='text';
       }else{
         const image=screenshot(input);mime=image.mime;kind='image';
-        content=notes||`截图文件：${filename}\n图片原图已保存，但尚未提供文字摘录。系统没有执行 OCR，不能从这条占位记录推断截图内容。`;
+        // An image without an accompanying transcription is an asset, not a
+        // document. Keep the original bytes in the library, but do not enqueue
+        // synthetic text such as “尚未提供文字摘录” into the research corpus.
+        if (!cloud && !notes) {
+          const id=randomUUID(),metadata={id,sourceId:'',filename,title:input.title||filename,kind,hasText:false,uploadedAt:new Date().toISOString(),size:bytes.length,parser:'local',assetOnly:true,sourceUrl:input.url||null};
+          this.store.db.prepare('INSERT INTO library_uploads VALUES (?,?,?,?,?)').run(id,'',JSON.stringify(metadata),mime,bytes);
+          return {upload:this.public(metadata),job:null};
+        }
+        content=notes;
       }
       if(notes&&kind!=='image'&&!cloud)content+=`\n\n【上传者补充说明】\n${notes}`;
     }else{

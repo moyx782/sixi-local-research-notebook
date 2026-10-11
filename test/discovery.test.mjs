@@ -54,7 +54,7 @@ test('a second discovery round skips the same collected URL without enqueueing a
  assert.equal(run.status,'completed');assert.equal(run.selected.length,0);assert.equal(run.reusedCount,1);assert.equal(f.app.store.db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n,firstJobs);assert.equal(detail.documents.length,1);
 });
 
-test('automatic discovery continues after search/login failures, deduplicates sources, and makes independent human tasks',async t=>{
+test('automatic discovery continues after search/login failures, deduplicates sources, and groups human follow-up',async t=>{
  let searches=0,releaseFirst;const f=await fixture(t,{
    search:async()=>{searches++;if(searches===1){await new Promise(resolve=>{releaseFirst=resolve;});throw new Error('Search verification needed');}return {provider:'Fixture',items:[item('https://example.com/login'),item('https://example.com/public?utm_source=test'),item('https://example.com/public'),item('http://127.0.0.1/private'),item('https://example.com/catalog.pdf')]};},
    fetch:async url=>url.includes('/login')?resource('<html><title>Login</title><form><input type="password"></form></html>',url):publicPage(url),
@@ -65,11 +65,11 @@ test('automatic discovery continues after search/login failures, deduplicates so
  await f.app.discovery.running;await f.app.collector.running;
  const detail=await f.call(f.path);assert.equal(detail.discovery.status,'partial');assert.equal(searches,6);
  assert.equal(detail.discovery.candidates.length,2);assert.equal(detail.discovery.counts.completed,1);assert.equal(detail.discovery.counts.failed,1);
- assert.equal(detail.documents.length,1);assert.equal(detail.handoffs.filter(t=>t.status==='open').length,3);
- assert.ok(detail.handoffs.some(t=>t.url.includes('/login')));assert.ok(detail.handoffs.some(t=>t.url.endsWith('.pdf')));
+ assert.equal(detail.documents.length,1);assert.equal(detail.handoffs.filter(t=>t.status==='open').length,1,'automatic failures are grouped into one actionable task');
+ assert.match(detail.handoffs.find(t=>t.status==='open').reason,/\/login/);assert.match(detail.handoffs.find(t=>t.status==='open').reason,/catalog\.pdf/);
  assert.equal(detail.project.evidence.length,0,'collection never fabricates evidence or findings');
  await f.call(f.path+'/discover',{useAI:false});await f.app.discovery.running;
- const next=await f.call(f.path);assert.ok(next.discovery.reusedCount>=1);assert.equal(next.discovery.selected.some(s=>s.url.endsWith('/public')),false,'a completed URL is not collected again');assert.equal(next.handoffs.length,3,'open human tasks do not duplicate');
+ const next=await f.call(f.path);assert.ok(next.discovery.reusedCount>=1);assert.equal(next.discovery.selected.some(s=>s.url.endsWith('/public')),false,'a completed URL is not collected again');assert.equal(next.handoffs.filter(t=>t.status==='open').length,1,'open human tasks do not duplicate');
 });
 
 test('invalid AI plans or invented candidate URLs fall back to rule search and selection',async t=>{
@@ -138,6 +138,16 @@ test('human handoffs accept document attachments and keep the original in the li
  await f.restart();const after=(await f.call(f.path)).handoffs[0];assert.equal(after.attachmentFilename,'product-brief.md');assert.equal((await fetch(f.base+doc.attachments[0].downloadUrl)).status,200);
 });
 
+test('image-only human handoff keeps the original asset without creating placeholder text',async t=>{
+ const f=await fixture(t,{search:async()=>({items:[]})});
+ const created=await f.call(f.path+'/handoffs',{title:'Capture gated page',url:'https://example.com/gated',reason:'The page needs a human session.'});
+ const completed=await f.call(f.path+'/handoffs/'+created.task.id,{action:'complete',attachment:{filename:'gated.png',base64:png},attachToProject:true});
+ assert.equal(completed.status,200);assert.equal(completed.task.attachedToProject,false);assert.equal(completed.task.attachmentKind,'image');
+ assert.equal((await f.call(f.path)).documents.length,0,'an image without text is not a research document');
+ const upload=(await f.call('/api/library/uploads')).items[0];assert.equal(upload.documentId,null);assert.equal(upload.hasText,false);
+ assert.equal((await fetch(f.base+`/api/library/uploads/${upload.id}/image`)).status,200);
+});
+
 test('files and screenshots upload directly to the library with originals retained and no project attachment required',async t=>{
  const f=await fixture(t,{search:async()=>({items:[]})});
  const text='# Public source\n\nA manufacturer describes battery-powered applications.';
@@ -146,16 +156,13 @@ test('files and screenshots upload directly to the library with originals retain
  let library=await f.call('/api/documents');assert.equal(library.items.length,1);assert.equal((await f.call(f.path)).documents.length,0);
  const doc=(await f.call('/api/documents/'+library.items[0].id)).document;assert.equal(doc.text,text);assert.equal(doc.attachments[0].kind,'text');
  const original=await fetch(f.base+doc.attachments[0].downloadUrl);assert.equal(await original.text(),text);assert.match(original.headers.get('content-disposition'),/^attachment;/);
- const imageUpload=await f.call('/api/library/uploads',{filename:'capture.png',base64:png});assert.equal(imageUpload.status,202);await f.app.collector.running;
- library=await f.call('/api/documents');assert.equal(library.items.length,2);
- const imageDoc=(await f.call('/api/documents/'+library.items.find(d=>d.id!==doc.id).id)).document;assert.equal(imageDoc.attachments[0].hasText,false);assert.match(imageDoc.text,/没有执行 OCR/);
+ const imageUpload=await f.call('/api/library/uploads',{filename:'capture.png',base64:png});assert.equal(imageUpload.status,202);assert.equal(imageUpload.upload.documentId,null);
+ library=await f.call('/api/documents');assert.equal(library.items.length,1,'image-only uploads do not create a placeholder document');
+ const uploads=await f.call('/api/library/uploads');const imageAsset=uploads.items.find(u=>u.id===imageUpload.upload.id);assert.equal(imageAsset.hasText,false);assert.equal(imageAsset.documentId,null);
  assert.equal((await f.call('/api/library/uploads',{filename:'invalid.png',base64:Buffer.from('<html>bad</html>').toString('base64')})).status,400);
  assert.equal((await f.call('/api/library/uploads',{})).status,400);
- await f.call(f.path+'/attach',{documentIds:[imageDoc.id]});assert.equal((await f.call(f.path)).documents.length,1);
- await f.call(f.path+'/detach',{documentId:imageDoc.id});assert.equal((await f.call(f.path)).documents.length,0);assert.equal((await f.call('/api/documents')).items.length,2);
- await f.call(f.path+'/attach',{documentIds:[imageDoc.id]});assert.equal((await f.call(f.path)).documents.length,1);
  const task=(await f.call(f.path+'/handoffs',{title:'Library only'})).task;
  await f.call(f.path+'/handoffs/'+task.id,{action:'complete',content:'Human research captured directly to library.',attachToProject:false});await f.app.collector.running;
- assert.equal((await f.call(f.path)).documents.length,1);assert.equal((await f.call('/api/documents')).items.length,3);
- await f.restart();assert.equal((await fetch(f.base+imageDoc.attachments[0].url)).status,200);assert.equal((await f.call('/api/documents')).items.length,3);
+ assert.equal((await f.call(f.path)).documents.length,0);assert.equal((await f.call('/api/documents')).items.length,2);
+ await f.restart();assert.equal((await fetch(f.base+`/api/library/uploads/${imageUpload.upload.id}/image`)).status,200);assert.equal((await f.call('/api/documents')).items.length,2);
 });

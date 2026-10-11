@@ -34,10 +34,28 @@ export class Handoffs {
     store.db.exec(`CREATE TABLE IF NOT EXISTS research_handoffs (id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data_json TEXT NOT NULL,updated_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS handoffs_project ON research_handoffs(project_id);
       CREATE TABLE IF NOT EXISTS research_screenshots (task_id TEXT PRIMARY KEY,mime TEXT NOT NULL,bytes BLOB NOT NULL);`);
+    this.compactLegacyAutoTasks();
   }
   list(projectId) {return this.store.db.prepare('SELECT data_json FROM research_handoffs WHERE project_id=? ORDER BY updated_at DESC,rowid DESC').all(projectId).map(row=>JSON.parse(row.data_json));}
   get(id) {const row=this.store.db.prepare('SELECT data_json FROM research_handoffs WHERE id=?').get(id);if(!row)throw new AppError('人工任务不存在',404);return JSON.parse(row.data_json);}
   save(task) {task.updatedAt=now();this.store.db.prepare('INSERT INTO research_handoffs VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json,updated_at=excluded.updated_at').run(task.id,task.projectId,JSON.stringify(task),task.updatedAt);return task;}
+  compactLegacyAutoTasks() {
+    const rows=this.store.db.prepare(`SELECT project_id,data_json FROM research_handoffs WHERE data_json LIKE '%"status":"open"%' ORDER BY updated_at ASC,rowid ASC`).all();
+    const groups=new Map();
+    for(const row of rows){
+      let task;try{task=JSON.parse(row.data_json);}catch{continue;}
+      if(!task.dedupeKey||!/^(source|query|pdf|empty):/.test(task.dedupeKey))continue;
+      if(!groups.has(row.project_id))groups.set(row.project_id,[]);groups.get(row.project_id).push(task);
+    }
+    for(const [projectId,tasks] of groups){
+      if(tasks.length<2)continue;
+      const canonical=tasks[0],key=`legacy-auto:${projectId}`;
+      canonical.title=`自动采集待补充资料（已合并 ${tasks.length} 项）`;canonical.url='';canonical.dedupeKey=key;
+      canonical.reason=tasks.map(task=>`【${task.title}】${task.url?`\n来源：${task.url}`:''}\n${task.reason}`).join('\n\n').slice(0,2000);
+      this.save(canonical);
+      for(const duplicate of tasks.slice(1))this.save({...duplicate,status:'skipped',mergedInto:canonical.id,updatedAt:now()});
+    }
+  }
   create(projectId,input) {
     this.research.get(projectId);
     const tasks=this.list(projectId);
@@ -53,7 +71,10 @@ export class Handoffs {
     const task=this.get(id);if(task.status!=='open')throw new AppError('此任务已经处理',409);
     const file=attachment(input.attachment),image=screenshot(input.screenshot);
     const imageFile=file&&/\.(png|jpe?g|webp)$/i.test(file.filename);
-    const caption=text(input.content||'',450000,'补采文字',input.parser!=='mineru'&&(!file||imageFile));
+    // A file upload can stand on its own: image-only captures are preserved as
+    // library assets and must not be forced through a synthetic text record.
+    // Text-only handoffs still require the researcher to provide an excerpt.
+    const caption=text(input.content||'',450000,'补采文字',input.parser!=='mineru'&&!file);
     const url=input.url?normalizeUrl(input.url):task.url;
     const assignee=text(input.assignee||task.assignee||'',100,'负责人');
     const title=text(input.title||task.title,300,'资料标题',true);
@@ -61,9 +82,10 @@ export class Handoffs {
     const notes=`人工补采记录人：${assignee||'未署名'}${url?`\n原始来源：${url}`:''}${caption?`\n\n${caption}`:''}`;
     if(file){
       if(!this.uploads)throw new AppError('资料上传服务未配置',503);
-      const result=await this.uploads.upload({parser:input.parser==='mineru'?'mineru':'local',filename:file.filename,base64:file.base64,title,url,content:notes},{projectId:attachToProject?task.projectId:undefined});
+      const uploadContent=imageFile&&!caption?'':notes;
+      const result=await this.uploads.upload({parser:input.parser==='mineru'?'mineru':'local',filename:file.filename,base64:file.base64,title,url,content:uploadContent},{projectId:attachToProject?task.projectId:undefined});
       if(result.job&&attachToProject)this.research.mutate(task.projectId,p=>{if(!p.sourceIds.includes(result.job.sourceId))p.sourceIds.push(result.job.sourceId);});
-      const saved={...task,title,url,assignee,status:'completed',uploadId:result.upload.id,sourceId:result.job?.sourceId||null,jobId:result.job?.id||null,hasScreenshot:result.upload.kind==='image',attachmentFilename:result.upload.filename,attachmentKind:result.upload.kind,parser:result.upload.parser||'local',attachedToProject:attachToProject,completedAt:now()};
+      const saved={...task,title,url,assignee,status:'completed',uploadId:result.upload.id,sourceId:result.job?.sourceId||null,jobId:result.job?.id||null,hasScreenshot:result.upload.kind==='image',attachmentFilename:result.upload.filename,attachmentKind:result.upload.kind,parser:result.upload.parser||'local',attachedToProject:Boolean(attachToProject&&result.job),completedAt:now()};
       this.save(saved);
       if(result.job)this.collector.kick();
       return {task:this.get(id),...result};
