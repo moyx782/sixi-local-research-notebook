@@ -280,6 +280,39 @@ export async function researchRoute(req, url, { research, store, collector, sess
     else if (action === 'findings' && !itemId) json(res, 201, { ok: true, project: research.addFinding(id, input) });
     else if (action === 'review' && itemId) json(res, 200, { ok: true, project: research.review(id, itemId, input) });
     else if (action === 'generate') json(res, 200, { ok: true, ...await research.generate(id, input) });
+    else if (action === 'collect-all') {
+      if (!Array.isArray(input.items) || !input.items.length || input.items.length > 50)
+        throw new AppError('一次最多批量采集 1–50 个来源');
+      const jobs = [];
+      const sourceIds = [];
+      const seen = new Set();
+      let skipped = 0;
+      const normalizedItems = input.items.map(item => collectionInput(item));
+      for (const normalized of normalizedItems) {
+        if (normalized.sessionId) sessions.validate(normalized.sessionId, normalized.url);
+        // The Store also canonicalizes URL identity. This local key avoids
+        // sending exact duplicates to it within the same one-click request.
+        const key = normalized.type === 'text'
+          ? `text:${normalized.title}\n${normalized.content}`
+          : `${normalized.type}:${normalized.url.toLowerCase()}:${normalized.sessionId || ''}`;
+        if (seen.has(key)) { skipped++; continue; }
+        seen.add(key);
+        const job = store.enqueue(normalized, { reuseCompleted: true });
+        jobs.push(job);
+        if (!sourceIds.includes(job.sourceId)) sourceIds.push(job.sourceId);
+      }
+      if (sourceIds.length) research.mutate(id, p => {
+        for (const sourceId of sourceIds) if (!p.sourceIds.includes(sourceId)) p.sourceIds.push(sourceId);
+      });
+      collector.kick();
+      json(res, 202, {
+        ok: true,
+        jobs,
+        accepted: jobs.length,
+        reused: jobs.filter(job => job.reused).length,
+        skipped,
+      });
+    }
     else if (action === 'collect' || action === 'pdf') {
       let data = input;
       if (action === 'pdf') {

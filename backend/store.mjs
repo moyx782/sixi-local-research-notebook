@@ -13,6 +13,15 @@ function canonicalSourceUrl(value) {
   return url.href;
 }
 
+// Keep the raw content hash for exact provenance, and use a second, stable
+// fingerprint to catch the same article when a fetcher changes line wrapping,
+// Unicode width, or incidental whitespace. This is intentionally conservative:
+// punctuation and word order remain significant so similar articles are not
+// silently merged.
+function normalizedContentHash(value) {
+  return hash(String(value ?? '').normalize('NFKC').replace(/\s+/gu, ' ').trim().toLocaleLowerCase());
+}
+
 export class Store {
   constructor(path) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -33,7 +42,7 @@ export class Store {
       CREATE UNIQUE INDEX IF NOT EXISTS one_active_job ON jobs(source_id) WHERE status IN ('queued','running');
       CREATE TABLE IF NOT EXISTS documents (
         id TEXT PRIMARY KEY, content_hash TEXT UNIQUE NOT NULL, title TEXT NOT NULL, text TEXT NOT NULL,
-        excerpt TEXT NOT NULL, created_at TEXT NOT NULL
+        excerpt TEXT NOT NULL, created_at TEXT NOT NULL, normalized_hash TEXT
       );
       CREATE TABLE IF NOT EXISTS origins (
         source_id TEXT NOT NULL REFERENCES sources(id), url TEXT NOT NULL,
@@ -53,8 +62,18 @@ export class Store {
         state TEXT NOT NULL CHECK(state IN ('ready','needs_login')),
         expires_at TEXT, revision TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
-      PRAGMA user_version=2;
+      PRAGMA user_version=3;
     `);
+    // Existing local databases were created before normalized_hash existed.
+    // Migrate in place and backfill fingerprints once; the update is safe to
+    // repeat because every row receives the same deterministic value.
+    try { this.db.exec('ALTER TABLE documents ADD COLUMN normalized_hash TEXT'); } catch (error) {
+      if (!/duplicate column name/i.test(String(error?.message || ''))) throw error;
+    }
+    const rows = this.db.prepare('SELECT id,text FROM documents WHERE normalized_hash IS NULL').all();
+    const update = this.db.prepare('UPDATE documents SET normalized_hash=? WHERE id=?');
+    for (const row of rows) update.run(normalizedContentHash(row.text), row.id);
+    this.db.exec('CREATE INDEX IF NOT EXISTS documents_normalized_hash ON documents(normalized_hash)');
   }
 
   transaction(fn) {
@@ -69,7 +88,7 @@ export class Store {
     }
   }
 
-  enqueue(input) {
+  enqueue(input, { reuseCompleted = false } = {}) {
     return this.transaction(() => {
       const sourceUrl = input.type === 'text' ? '' : canonicalSourceUrl(input.url);
       const identity =
@@ -100,6 +119,12 @@ export class Store {
         .prepare("SELECT id FROM jobs WHERE source_id=? AND status IN ('queued','running')")
       .get(source.id);
       if (active) return { ...this.job(active.id), reused: true };
+      if (reuseCompleted) {
+        const completed = this.db
+          .prepare("SELECT id FROM jobs WHERE source_id=? AND status IN ('succeeded','partial') ORDER BY created_at DESC,rowid DESC LIMIT 1")
+          .get(source.id);
+        if (completed) return { ...this.job(completed.id), reused: true, alreadyCollected: true };
+      }
       const id = randomUUID();
       this.db
         .prepare(
@@ -233,9 +258,12 @@ export class Store {
   saveDocument(sourceId, article, resource) {
     return this.transaction(() => {
       const contentHash = hash(article.text);
-      const existing = this.db
+      const exact = this.db
         .prepare('SELECT id FROM documents WHERE content_hash=?')
         .get(contentHash);
+      const existing = exact || this.db
+        .prepare('SELECT id FROM documents WHERE normalized_hash=? ORDER BY created_at ASC,id ASC LIMIT 1')
+        .get(normalizedContentHash(article.text));
       const rawOriginUrl = article.url || resource.url || '';
       const originUrl = rawOriginUrl ? (() => { try { return canonicalSourceUrl(rawOriginUrl); } catch { return rawOriginUrl; } })() : '';
       const previous = this.db
@@ -258,7 +286,7 @@ export class Store {
       const id = existing?.id || randomUUID();
       if (!existing) {
         this.db
-          .prepare('INSERT INTO documents VALUES (?,?,?,?,?,?)')
+          .prepare('INSERT INTO documents VALUES (?,?,?,?,?,?,?)')
           .run(
             id,
             contentHash,
@@ -266,6 +294,7 @@ export class Store {
             article.text,
             article.text.slice(0, 280),
             resource.fetchedAt,
+            normalizedContentHash(article.text),
           );
       }
       const metadata = {
@@ -312,6 +341,45 @@ export class Store {
         quality: article.quality,
         warning: article.warning || null,
       };
+    });
+  }
+
+  deduplicateDocuments() {
+    return this.transaction(() => {
+      const groups = this.db.prepare(`
+        SELECT normalized_hash
+        FROM documents
+        WHERE normalized_hash IS NOT NULL
+        GROUP BY normalized_hash
+        HAVING COUNT(*) > 1
+      `).all();
+      if (!groups.length) return { groups: 0, merged: 0, skipped: 0 };
+      const referenced = new Set();
+      const projectTable = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_projects'").get();
+      if (projectTable) {
+        for (const row of this.db.prepare('SELECT data_json FROM research_projects').all()) {
+          try {
+            const project = JSON.parse(row.data_json);
+            for (const id of project.documentIds || []) referenced.add(id);
+            for (const evidence of project.evidence || []) if (evidence.documentId) referenced.add(evidence.documentId);
+          } catch { /* ignore malformed legacy project rows; collection data remains intact */ }
+        }
+      }
+      let merged = 0;
+      let skipped = 0;
+      for (const group of groups) {
+        const rows = this.db.prepare('SELECT id FROM documents WHERE normalized_hash=? ORDER BY created_at ASC,id ASC').all(group.normalized_hash);
+        const canonical = rows.find(row => referenced.has(row.id)) || rows[0];
+        const removable = rows.filter(row => row.id !== canonical.id && !referenced.has(row.id));
+        skipped += rows.length - 1 - removable.length;
+        for (const duplicate of removable) {
+          this.db.prepare('UPDATE origins SET document_id=? WHERE document_id=?').run(canonical.id, duplicate.id);
+          this.db.prepare('UPDATE visual_captures SET document_id=? WHERE document_id=?').run(canonical.id, duplicate.id);
+          this.db.prepare('DELETE FROM documents WHERE id=?').run(duplicate.id);
+          merged++;
+        }
+      }
+      return { groups: groups.length, merged, skipped };
     });
   }
 

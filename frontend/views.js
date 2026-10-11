@@ -72,7 +72,7 @@ export function sources(s) {
 }
 export function searchResults(s) {
  if(!s.searchResults)return '';
- return `<section class="panel search-results"><div class="section-heading"><h2>搜索结果 <span>${s.searchResults.length}</span></h2>${button('采集选中结果','collect-search','primary small')}</div><p class="field-hint">搜索服务：${esc(s.searchMeta?.provider||searchName(s))}</p>${(s.searchMeta?.warnings||[]).map(w=>`<p class="field-hint">${esc(w)}</p>`).join('')}${s.searchResults.length?s.searchResults.map((r,i)=>`<label class="search-result"><input type="checkbox" name="searchResult" value="${i}"><span><strong>${esc(r.title)}</strong><p>${esc(r.snippet||'')}</p><small>${esc(r.url)}</small></span></label>`).join(''):empty('没有找到结果','试试更具体的关键词，或直接添加 URL。')}</section>`;
+ return `<section class="panel search-results"><div class="section-heading"><div><h2>搜索结果 <span>${s.searchResults.length}</span></h2><p class="field-hint">可以逐条勾选，也可以一键提交全部结果；系统会复用已入库来源并跳过请求内重复项。</p></div><div class="heading-actions">${button('采集选中结果','collect-search','ghost small')}${s.searchResults.length?button(`一键采集全部 ${s.searchResults.length} 条`,'collect-all-search','primary small'):''}</div></div><p class="field-hint">搜索服务：${esc(s.searchMeta?.provider||searchName(s))}</p>${(s.searchMeta?.warnings||[]).map(w=>`<p class="field-hint">${esc(w)}</p>`).join('')}${s.searchResults.length?s.searchResults.map((r,i)=>`<label class="search-result"><input type="checkbox" name="searchResult" value="${i}"><span><strong>${esc(r.title)}</strong><p>${esc(r.snippet||'')}</p><small>${esc(r.url)}</small></span></label>`).join(''):empty('没有找到结果','试试更具体的关键词，或直接添加 URL。')}</section>`;
 }
 export function collection(s) {
  const jobs=s.jobs.filter(j=>s.project.sourceIds.includes(j.sourceId));

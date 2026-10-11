@@ -73,15 +73,20 @@ async function updateProject(suffix,data) {
  if(state.project?.id===id)state.project=result.project;state.report=null;
  await refresh();return result;
 }
-async function enqueue(items,projectId=state.project.id) {
- let accepted=0;const failures=[];
- for(const input of items) {
+async function enqueue(items,projectId=state.project.id,{all=false}={}) {
+ let accepted=0;let reused=0;const failures=[];
+ if(all){
+  try {
+   const result=await request(path('collect-all',projectId),{method:'POST',body:{items}});
+   accepted=result.accepted||0;reused=result.reused||0;
+  } catch(error){failures.push(`批量采集：${error.message}`);}
+ } else for(const input of items) {
   try {await request(path('collect',projectId),{method:'POST',body:input});accepted++;}
   catch(error){failures.push(`${input.url||input.title||'资料'}：${error.message}`);}
  }
  await refresh();
  if(failures.length)showModal(view.dialogShell('采集提交结果',`<div class="notice"><div><strong>${accepted} 项已加入后台采集</strong><span>以下 ${failures.length} 项未提交，其余任务继续运行。</span></div></div><ul class="error-list">${failures.map(e=>`<li>${esc(e)}</li>`).join('')}</ul>${view.button('查看 Agent 进度','collection','primary')}`));
- else{state.searchResults=null;navigate(4);toast(`${accepted} 项已加入后台采集`);}
+ else{state.searchResults=null;navigate(4);toast(`${accepted} 项已处理${reused?`，复用 ${reused} 个已有来源`:''}`);}
 }
 async function ai(mode,documentId) {
  if(!state.config.hasKey){if(modal.open)modal.close();state.view='settings';render();saveLocation();toast('先配置模型密钥；也可以继续手动提取和整理。');return;}
@@ -128,6 +133,7 @@ const actions={
   if(failed.length)showModal(view.dialogShell('部分来源需要关注',`<p>已提交的 ${added} 个来源会继续更新。</p><ul class="error-list">${failed.map(message=>`<li>${esc(message)}</li>`).join('')}</ul>`));
  },
  async 'collect-search'(){const selected=[...document.querySelectorAll('[name="searchResult"]:checked')].map(el=>state.searchResults[Number(el.value)]);if(!selected.length)throw new Error('请先选择要采集的搜索结果');await enqueue(selected.map(item=>({type:'url',url:item.url,title:item.title})));},
+ async 'collect-all-search'(){if(!state.searchResults?.length)throw new Error('当前没有可采集的搜索结果');await enqueue(state.searchResults.map(item=>({type:'url',url:item.url,title:item.title})),state.project.id,{all:true});},
  async 'build-report'(){state.report=await request(path('report'));render();},
  async 'skip-review'(){state.report=await request(path('report')+'?skipReview=true');state.step=8;state.view='research';render();saveLocation();toast('报告已生成，待审核发现已标注；可随时返回补审。');},
  'export-report'(){const blob=new Blob([state.report.markdown],{type:'text/markdown;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${state.project.objectName.replace(/[^\p{L}\p{N} _-]/gu,'')||'research'}-研究报告.md`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Markdown 报告已导出');},

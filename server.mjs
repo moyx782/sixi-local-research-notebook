@@ -122,6 +122,10 @@ function createLockedApp({ dataDir, store, sessions, fetcher, instanceLock, ask,
   const collector = new Collector(store, fetcher);
   const assistant = createAssistant(dataDir, { connection: modelConnection });
   const research = new Research(store, ask || assistant.ask);
+  // Merge legacy formatting-only duplicates after the project table exists.
+  // Evidence-referenced documents remain separate so existing quotes stay
+  // grounded in the exact text the user reviewed.
+  store.deduplicateDocuments();
   const handoffs = new Handoffs(store,research,collector);
   const mineru=createMineru(dataDir,mineruOptions);
   const visualCapture=createVisualCapture({sessions,...visualOptions});

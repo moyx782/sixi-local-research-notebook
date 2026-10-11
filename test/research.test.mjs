@@ -84,6 +84,26 @@ test('existing sources can be attached; unrelated sources cannot silently supply
  }
 });
 
+test('one-click batch collection reuses queued or completed sources and attaches them to the project', async t => {
+ const f=await fixture(t);
+ const batch=await f.call(f.endpoint+'/collect-all',{items:[
+   {type:'url',url:'https://example.com/batch'},
+   {type:'url',url:'https://www.example.com/batch/?utm_source=duplicate'},
+ ]});
+ assert.equal(batch.status,202);
+ assert.equal(batch.accepted,2);
+ assert.equal(batch.reused,1);
+ await f.app.collector.running;
+ const detail=await f.call(f.endpoint);
+ assert.equal(detail.documents.length,1);
+ const jobs=await f.call('/api/collections?limit=20');
+ assert.equal(jobs.total,1);
+ const repeat=await f.call(f.endpoint+'/collect-all',{items:[{type:'url',url:'https://example.com/batch'}]});
+ assert.equal(repeat.status,202);
+ assert.equal(repeat.reused,1);
+ assert.equal((await f.call('/api/collections?limit=20')).total,1,'a completed source is reused instead of creating a second job');
+});
+
 function tinyPDF() {
  // A deterministic valid PDF fixture with real font/text operators, not a parser mock.
  const stream='BT /F1 16 Tf 50 200 Td (A public research document with traceable evidence.) Tj ET';
