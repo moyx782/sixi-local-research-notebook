@@ -123,9 +123,10 @@ export class Discovery {
       const existing=tasks.find(task=>task.status==='open'&&(task.dedupeKey===key||task.dedupeKey===`legacy-auto:${run.projectId}`));
       const marker=input.url||`【${input.title}】`;
       if(existing){
-        if(existing.reason.includes(marker)) return existing;
+        if(existing.url===input.url&&input.url||existing.reason.includes(marker)) return existing;
         const addition=`【${input.title}】${input.url?`\n来源：${input.url}`:''}\n${input.reason}`;
-        existing.reason=`${existing.reason}\n\n${addition}`.slice(0,2000);
+        const previous=existing.url?`【${existing.title}】\n来源：${existing.url}\n${existing.reason}`:existing.reason;
+        existing.reason=`${previous}\n\n${addition}`.slice(0,2000);
         existing.title='自动采集待补充资料（已合并多项）';
         existing.url='';
         existing.dedupeKey=key;

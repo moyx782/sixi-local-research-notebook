@@ -85,7 +85,7 @@ export class Handoffs {
       const uploadContent=imageFile&&!caption?'':notes;
       const result=await this.uploads.upload({parser:input.parser==='mineru'?'mineru':'local',filename:file.filename,base64:file.base64,title,url,content:uploadContent},{projectId:attachToProject?task.projectId:undefined});
       if(result.job&&attachToProject)this.research.mutate(task.projectId,p=>{if(!p.sourceIds.includes(result.job.sourceId))p.sourceIds.push(result.job.sourceId);});
-      const saved={...task,title,url,assignee,status:'completed',uploadId:result.upload.id,sourceId:result.job?.sourceId||null,jobId:result.job?.id||null,hasScreenshot:result.upload.kind==='image',attachmentFilename:result.upload.filename,attachmentKind:result.upload.kind,parser:result.upload.parser||'local',attachedToProject:Boolean(attachToProject&&result.job),completedAt:now()};
+      const saved={...task,title,url,assignee,status:'completed',uploadId:result.upload.id,sourceId:result.job?.sourceId||null,jobId:result.job?.id||null,hasScreenshot:result.upload.kind==='image',attachmentFilename:result.upload.filename,attachmentKind:result.upload.kind,parser:result.upload.parser||'local',attachedToProject:Boolean(attachToProject&&(result.job||result.upload.projectId)),completedAt:now()};
       this.save(saved);
       if(result.job)this.collector.kick();
       return {task:this.get(id),...result};

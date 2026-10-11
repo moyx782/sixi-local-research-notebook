@@ -101,6 +101,12 @@ test('existing local captures keep their text; cloud human handoff attaches OCR 
  const completed=await f.call(`/api/research/projects/${project.id}/handoffs/${task.id}`,{action:'complete',parser:'mineru',screenshot:{base64:png},content:'',assignee:'Tester'});assert.equal(completed.status,200);
  await f.app.uploads.parser.running;await f.app.collector.running;
  const detail=await f.call('/api/research/projects/'+project.id);assert.equal(detail.documents.length,1);assert.match((await f.call('/api/documents/'+detail.documents[0].id)).document.text,/Tester/);
+ const fileTask=(await f.call(`/api/research/projects/${project.id}/handoffs`,{title:'Product image attachment'})).task;
+ const fileCapture=await f.call(`/api/research/projects/${project.id}/handoffs/${fileTask.id}`,{action:'complete',parser:'mineru',attachment:{filename:'product.png',base64:png},content:'',attachToProject:true});
+ assert.equal(fileCapture.status,200);assert.equal(fileCapture.task.attachedToProject,true,'cloud attachments retain their intended project while parsing');
+ await f.app.uploads.parser.running;await f.app.collector.running;
+ const upload=(await f.call('/api/library/uploads')).items.find(u=>u.id===fileCapture.upload.id);
+ assert.ok((await f.call('/api/research/projects/'+project.id)).documents.some(d=>d.id===upload.documentId));
 });
 
 test('ZIP and cloud responses are bounded, unsafe URLs rejected, and upstream messages cannot disclose Token',async t=>{
