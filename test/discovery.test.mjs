@@ -25,13 +25,24 @@ const item=(url,title='Domel industrial motor product')=>({url,title,snippet:'Of
 
 test('rule queries cover the research scope, and URL selection deduplicates tracking while rejecting unsafe/file targets',()=>{
  const queries=defaultQueries(projectInput);assert.equal(queries.length,6);assert.ok(queries.some(q=>q.query.includes('Domel')));assert.ok(queries.some(q=>q.dimension==='competition'));assert.ok(queries.every(q=>q.query.length<=200));
+ const deepQueries=defaultQueries(projectInput,{depth:'deep'});assert.ok(deepQueries.length>queries.length);assert.ok(deepQueries.length<=10);
  assert.equal(candidateUrl('https://example.com/a?utm_source=test&id=2#x'),'https://example.com/a?id=2');
  for(const url of ['http://127.0.0.1/test','https://10.0.0.1/','https://site.local/','file:///etc/passwd','https://example.com/report.pdf'])assert.throws(()=>candidateUrl(url));
  const candidates=[0,1,2,3].map(i=>({...item(`https://example.com/${i}`),rank:i}));candidates.push({...item('https://independent.example/report'),rank:5});
  const selected=rankCandidates(candidates,projectInput,8);assert.equal(selected.length,4);assert.ok(selected.some(i=>i.url.includes('independent')));
+ const short={...item('https://longform.example/short'),rank:1,title:'Product update',snippet:'Motor product note.'};
+ const long={...item('https://longform.example/report'),rank:4,title:'2026 Industrial Motor Market Outlook Report',snippet:'Long-form market analysis and outlook. '.repeat(30)};
+ assert.equal(rankCandidates([short,long],projectInput,1,{maxPerDomain:5,preferLongform:true})[0].url,long.url);
  assert.ok(irrelevantReason({url:'https://lurexadomel-engine.com/zh/',title:'Lurexa Domel official website',snippet:'Trading education and financial market guides'},projectInput));
  assert.ok(irrelevantReason(item('https://www.similarweb.com/website/domel.com/competitors/'),projectInput));
  assert.equal(irrelevantReason({url:'https://www.domel.com/products',title:'Domel Products',snippet:'Product catalog'},projectInput),'');
+});
+
+test('deep discovery expands query coverage and supports a custom material count',async t=>{
+ let searches=0;
+ const f=await fixture(t,{search:async()=>{searches++;return {provider:'Fixture',items:Array.from({length:10},(_,index)=>item(`https://source-${searches}-${index}.example/report`,`Deep market source ${searches}-${index}`))};}});
+ const started=await f.call(f.path+'/discover',{depth:'deep',maxSources:20,useAI:false});assert.equal(started.status,202);await f.app.discovery.running;await f.app.collector.running;
+ const run=(await f.call(f.path)).discovery;assert.equal(run.status,'completed');assert.equal(run.depth,'deep');assert.equal(run.maxSources,20);assert.equal(run.queries.length,9);assert.equal(searches,9);assert.equal(run.candidates.length,90);assert.equal(run.selected.length,20);assert.equal(run.counts.completed,20);
 });
 
 test('automatic discovery continues after search/login failures, deduplicates sources, and makes independent human tasks',async t=>{

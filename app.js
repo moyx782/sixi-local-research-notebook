@@ -107,7 +107,7 @@ const actions={
  'quote-selection'(){if(!selection)return toast('先在左侧原文中选中一段文字。');const field=document.querySelector('#quoteText');field.value=selection;field.focus();},
  'generate-evidence'(el){return ai('evidence',el.dataset.id);}, 'generate-findings'(){return ai('findings');},
  'webfetch'(){state.sourceType='url';navigate(3);document.querySelector('#links')?.focus();},
- async 'auto-collect'(){const maxSources=Number(document.querySelector('#autoSourceLimit')?.value||8);const result=await request(path('discover'),{method:'POST',body:{maxSources}});state.discovery=result.discovery;await refresh();navigate(4);toast('自动搜集已在后台开始，可以离开页面。');},
+ async 'auto-collect'(){const maxSources=Number(document.querySelector('#autoSourceLimit')?.value||12),depth=document.querySelector('#autoDepth')?.value||'deep';if(!Number.isInteger(maxSources)||maxSources<1||maxSources>30)throw new Error('材料数量必须是 1–30 之间的整数');if(!['standard','deep'].includes(depth))throw new Error('搜集深度选项无效');const result=await request(path('discover'),{method:'POST',body:{maxSources,depth}});state.discovery=result.discovery;await refresh();navigate(4);toast(`自动搜集已在后台开始（${depth==='deep'?'深入':'标准'}，目标 ${maxSources} 个材料），可以离开页面。`);},
  async 'stop-auto'(){await request(path('discover/cancel'),{method:'POST',body:{}});await refresh();toast('已停止后续搜索；已提交的采集和人工任务继续保留。');},
  'new-handoff'(){showModal(view.dialogShell('创建人工补采任务',handoffForm(state)));},
  'upload-library'(){showModal(view.dialogShell('直接上传到资料库',libraryUploadForm(state)));},
