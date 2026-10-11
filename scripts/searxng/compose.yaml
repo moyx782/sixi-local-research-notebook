@@ -1,0 +1,25 @@
+name: sixi-search
+services:
+  searxng:
+    image: ghcr.io/searxng/searxng@sha256:0e8d3a8df66b2dbc396fe4fd170556ebdb6a726e0a857029afff3fd28c5e1e92
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    env_file: .env
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+    volumes:
+      - ./config:/etc/searxng
+      - search-cache:/var/cache/searxng
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "2"
+volumes:
+  search-cache:

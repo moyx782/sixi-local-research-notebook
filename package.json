@@ -1,0 +1,36 @@
+{
+  "name": "sixi-local-research-notebook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "cookies": "node scripts/cookies.mjs",
+    "deploy:local": "node scripts/local-service.mjs deploy",
+    "service:status": "node scripts/local-service.mjs status",
+    "service:restart": "node scripts/local-service.mjs restart",
+    "service:start": "node scripts/local-service.mjs start",
+    "service:stop": "node scripts/local-service.mjs stop",
+    "test": "node --test test/*.test.mjs",
+    "test:live": "node scripts/live-smoke.mjs",
+    "check": "node --check server.mjs && node --check backend/api.mjs && node --check backend/assistant.mjs && node --check backend/collector.mjs && node --check backend/fetch.mjs && node --check backend/input.mjs && node --check backend/instance-lock.mjs && node --check backend/parsers.mjs && node --check backend/store.mjs && node --check backend/cookie-sessions.mjs && node --check backend/keychain.mjs && node --check backend/login-detection.mjs && node --check scripts/cookies.mjs && node --check scripts/local-service.mjs && node --check scripts/live-smoke.mjs && node --check app.js && node --check frontend/core.js && node --check frontend/views.js && node --check backend/research.mjs && node --check backend/pdf.mjs && node --check backend/search.mjs && node --check frontend/market.js && node --check frontend/auth.js && node --check backend/auth.mjs && node --check backend/scoring.mjs && node --check scripts/local-client.mjs && node --check backend/model-connection.mjs && node --check frontend/model-settings.js && node --check backend/discovery.mjs && node --check backend/handoffs.mjs && node --check frontend/discovery.js && node --check backend/uploads.mjs && node --check backend/mineru.mjs && node --check backend/upload-parser.mjs && node --check frontend/mineru.js && node --check backend/search-provider.mjs && node --check frontend/search-settings.js && node --check scripts/searxng.mjs && node --check backend/visual-capture.mjs",
+    "search:start": "node scripts/searxng.mjs start",
+    "search:stop": "node scripts/searxng.mjs stop",
+    "search:status": "node scripts/searxng.mjs status",
+    "browser:install": "playwright install chromium"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.55.1",
+    "@mariozechner/pi-coding-agent": "^0.55.1",
+    "@mozilla/readability": "0.6.0",
+    "fast-xml-parser": "5.11.1",
+    "ipaddr.js": "2.5.0",
+    "jsdom": "30.1.0",
+    "pdfjs-dist": "6.3.289",
+    "playwright": "^1.55.0",
+    "undici": "8.10.2",
+    "yauzl": "3.4.0"
+  }
+}
