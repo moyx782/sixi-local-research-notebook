@@ -61,7 +61,7 @@ test('AI candidates are grounded, limited to supplied documents/evidence, and re
  const e=generated.project.evidence[0];assert.equal(e.verified,false);
  assert.equal((await f.call(f.endpoint+'/findings',{title:'x',body:'x',category:'trend',evidenceIds:[e.id]})).status,400);
  await f.call(f.endpoint+'/evidence/'+e.id,{action:'confirm'});
- answer=JSON.stringify({items:[{title:'Valid finding',body:'With uncertainty',category:'opportunity',evidenceIds:[e.id]},{title:'Invalid',body:'False',category:'trend',evidenceIds:['invented']}]});
+ answer=JSON.stringify({items:[{title:'Valid finding',body:'With uncertainty',category:'opportunity',implication:'This matters for Domel planning.',recommendation:'Product strategy should validate it this quarter with one customer metric.',evidenceIds:[e.id]},{title:'Invalid',body:'False',category:'trend',evidenceIds:['invented']}]});
  const result=await f.call(f.endpoint+'/generate',{mode:'findings'});assert.equal(result.added,1);assert.equal(result.skipped,1);assert.equal(result.project.findings[0].status,'draft');
  assert.equal((await f.call(f.endpoint+'/report')).status,400);
  answer='{"items":[]}';assert.equal((await f.call(f.endpoint+'/generate',{mode:'findings'})).status,422);

@@ -198,10 +198,15 @@ export class Research {
           if (!item || typeof item !== 'object') throw new AppError('候选内容无效');
           if (mode === 'evidence') {
             if (item.documentId !== input.documentId) throw new AppError('引用了未提供的资料');
+            if (typeof item.note !== 'string' || !item.note.trim())
+              throw new AppError('AI 证据缺少直接含义与行动，请重试');
             p.evidence.push(this.evidenceItem(p, item, 'ai'));
           } else {
             const offered = new Set(project.evidence.filter(e => e.verified).slice(0, 40).map(e => e.id));
             if (!Array.isArray(item.evidenceIds) || item.evidenceIds.some(id => !offered.has(id))) throw new AppError('无效证据');
+            if (typeof item.implication !== 'string' || !item.implication.trim() ||
+                typeof item.recommendation !== 'string' || !item.recommendation.trim())
+              throw new AppError('AI 发现缺少 Domel 影响或具体建议，请重试');
             p.findings.push(this.findingItem(p, item, 'ai'));
           }
           added++;
