@@ -18,6 +18,13 @@ const reviewStates = ['draft', 'keep', 'reject', 'investigate'];
 const dimensions = ['structure', 'competition', 'demand', 'technology', 'environment', 'attractiveness', 'strategy'];
 const dimensionLabels = { structure: '市场结构与发展', competition: '竞争对手与替代品', demand: '客户需求与细分', technology: '技术趋势', environment: '外部环境', attractiveness: '市场吸引力', strategy: '战略建议' };
 const optionalText = (value, label, max = 2000) => value === undefined || value === '' ? '' : requireText(value, label, max);
+const actionSignals = /验证|核实|比较|收集|访谈|测试|跟踪|评估|优先|开发|联系|建立|监测|测量|试点|报价|发布|审查|安排|调查|确认|纳入|制定|优化|调整|投入|停止|保留|试验|询价|筛选|validate|verify|compare|collect|interview|test|track|evaluate|prioritize|develop|contact|pilot|measure|monitor|confirm|plan|adjust|build|review/i;
+const evasiveOnly = /^(资料不足|无法判断|需要进一步核实|建议继续研究|暂无结论|无法确定|需要更多资料)$/;
+const actionableRecommendation = value => {
+  if (typeof value !== 'string') return false;
+  const text = value.trim().replace(/[，。；、：:\s]/g, '');
+  return text.length >= 8 && actionSignals.test(value) && !evasiveOnly.test(text);
+};
 function marketScope(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError('市场范围格式无效');
   const fields = { market: 500, geography: 300, period: 100, segments: 1000, validationPlan: 2000, monitoringPlan: 2000 };
@@ -205,7 +212,7 @@ export class Research {
             const offered = new Set(project.evidence.filter(e => e.verified).slice(0, 40).map(e => e.id));
             if (!Array.isArray(item.evidenceIds) || item.evidenceIds.some(id => !offered.has(id))) throw new AppError('无效证据');
             if (typeof item.implication !== 'string' || !item.implication.trim() ||
-                typeof item.recommendation !== 'string' || !item.recommendation.trim())
+                !actionableRecommendation(item.recommendation))
               throw new AppError('AI 发现缺少 Domel 影响或具体建议，请重试');
             p.findings.push(this.findingItem(p, item, 'ai'));
           }
