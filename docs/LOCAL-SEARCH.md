@@ -13,7 +13,7 @@ SIXI_DOCKER_CONTEXT=colima npm run search:status
 SIXI_DOCKER_CONTEXT=colima npm run search:stop
 ```
 
-Docker Desktop 或 Linux 可省略 `SIXI_DOCKER_CONTEXT`，使用 Docker 当前 context。首次启动生成配置到 `~/.sixi/searxng/`（遵循 `SIXI_DATA_DIR`），不会把服务密钥写入仓库，也不会覆盖已有运行配置。模板位于 `scripts/searxng/`。镜像固定为实测版本 2026.9.19-c0014f015 的官方 GHCR digest，避免 `latest` 自动变化。
+Docker Desktop 或 Linux 可省略 `SIXI_DOCKER_CONTEXT`，使用 Docker 当前 context。首次启动生成配置到 `~/.sixi/searxng/`（遵循 `SIXI_DATA_DIR`），不会把服务密钥写入仓库，也不会覆盖已有运行配置。模板位于 `scripts/searxng/`。默认启用直连的 Bing 中国站（`cn.bing.com`）和 360 搜索；Google、DuckDuckGo、会触发验证的百度以及当前超时的 Wikipedia 不放入默认上游。镜像固定为实测版本 2026.9.19-c0014f015 的官方 GHCR digest，避免 `latest` 自动变化。
 
 服务仅绑定 `127.0.0.1:8888`。容器随 Docker 恢复运行；电脑重启后需要先启动 Docker/Colima，本命令不会为虚拟机安装开机服务。应用后端仍由原 launchd 服务运行。停止搜索容器不影响资料库和 WebFetch。
 
@@ -27,7 +27,7 @@ Docker Desktop 或 Linux 可省略 `SIXI_DOCKER_CONTEXT`，使用 Docker 当前 
 SIXI_DOCKER_CONTEXT=colima SEARXNG_PROXY=http://host.lima.internal:7897 npm run search:start
 ```
 
-上述环境变量只用于首次生成 `config/settings.yml`。之后修改运行目录中的 `outgoing.proxies`，再执行 `docker --context colima compose -f ~/.sixi/searxng/compose.yaml restart searxng`。无代理需求时删除 `outgoing.proxies`；Docker Desktop 通常使用其文档提供的 `host.docker.internal`。代理地址必须从容器实际可达，不能直接照搬 Colima 地址。
+上述环境变量只用于首次生成 `config/settings.yml`。默认配置不使用代理，避免代理出口触发 Bing 断开或搜索验证；如果所在网络必须走代理，再修改运行目录中的 `outgoing.proxies`，并执行 `docker --context colima compose -f ~/.sixi/searxng/compose.yaml restart searxng`。代理地址必须从容器实际可达，不能直接照搬 Colima 地址。
 
 镜像拉取与搜索请求是两条连接。本机首次拉取直连超时，因此在 Colima 虚拟机的 `/etc/docker/daemon.json` 为镜像下载设置了本机 HTTP 代理，原文件备份为 `/etc/docker/daemon.json.before-sixi-search`。该运行时设置可能随 Colima 重新生成配置而变化；已缓存镜像可直接启动。若需长期代理拉取镜像，可按 Colima/Docker 官方方式配置。没有修改 Clash 的 LAN 开放开关。
 

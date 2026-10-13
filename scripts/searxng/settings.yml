@@ -1,6 +1,6 @@
 use_default_settings:
   engines:
-    keep_only: [google, bing, duckduckgo]
+    keep_only: [bing, 360search]
 general:
   instance_name: "Domel Research · Local Search"
 search:
@@ -11,13 +11,15 @@ server:
   public_instance: false
   image_proxy: false
 engines:
-  - name: google
-    disabled: false
   - name: bing
+    engine: bing
+    base_url: https://cn.bing.com
+    timeout: 12.0
     disabled: false
-  - name: duckduckgo
+  - name: 360search
+    engine: 360search
+    timeout: 20.0
     disabled: false
 outgoing:
   request_timeout: 8.0
   max_request_timeout: 12.0
-  # Optional outgoing.proxies is added on first install by SEARXNG_PROXY.
