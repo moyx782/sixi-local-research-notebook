@@ -64,6 +64,7 @@ test('AI candidates are grounded, limited to supplied documents/evidence, and re
  answer=JSON.stringify({items:[{title:'Valid finding',body:'With uncertainty',category:'opportunity',evidenceIds:[e.id]},{title:'Invalid',body:'False',category:'trend',evidenceIds:['invented']}]});
  const result=await f.call(f.endpoint+'/generate',{mode:'findings'});assert.equal(result.added,1);assert.equal(result.skipped,1);assert.equal(result.project.findings[0].status,'draft');
  assert.equal((await f.call(f.endpoint+'/report')).status,400);
+ answer='{"items":[]}';assert.equal((await f.call(f.endpoint+'/generate',{mode:'findings'})).status,422);
  answer='broken JSON';assert.equal((await f.call(f.endpoint+'/generate',{mode:'findings'})).status,422);
  assert.equal((await f.call(f.endpoint)).project.findings.length,1);
 });
@@ -137,14 +138,14 @@ test('optional review includes explicitly labelled drafts, never includes reject
 });
 
 test('Domel market scope, source assessment, segmentation and strategy remain linked to original evidence in reports',async t=>{
- let prompt;const f=await fixture(t,async input=>{prompt=input;return '{"items":[]}';});const doc=await seed(f);
+ let prompt;const f=await fixture(t,async input=>{prompt=input;return JSON.stringify({items:[{title:'Evidence-backed action',body:'Prioritize the application validation described by the evidence.',category:'opportunity',evidenceIds:[input.context[0].title],implication:'This gives Domel a concrete validation priority.',recommendation:'Product strategy should validate it this quarter with one customer metric.'}]});});const doc=await seed(f);
  const scope={market:'Industrial motors and electromechanical equipment',geography:'China with global comparison',period:'2026 Q3',segments:'Industrial automation',dimensions:['competition','technology','attractiveness','strategy'],validationPlan:'Interview Domel market staff; record disagreements',monitoringPlan:'Quarterly review of competitor product updates'};
  assert.equal((await f.call(f.endpoint+'/edit',{question:f.p.question,objectType:f.p.objectType,objectName:f.p.objectName,scope})).status,200);
  assert.equal((await f.call(f.endpoint+'/edit',{question:f.p.question,objectType:f.p.objectType,objectName:f.p.objectName,scope:{...scope,dimensions:['invented']}})).status,400);
  let p=(await f.call(f.endpoint+'/evidence',{documentId:doc.id,quote,dimension:'technology',entity:'Domel motor',segment:'Industrial automation',sourceLevel:'primary',credibility:'Manufacturer statement; no independent performance comparison'})).project;
  const e=p.evidence[0];assert.equal(e.sourceLevel,'primary');assert.equal(e.entity,'Domel motor');
  p=(await f.call(f.endpoint+'/findings',{title:'Application opportunity',body:'Needs validation against application requirements',category:'opportunity',evidenceIds:[e.id],dimension:'attractiveness',entity:'Domel',segment:'Industrial automation',attractiveness:'medium',implication:'Potential product planning relevance',scenario:'If demand shifts toward efficient motors, evaluate application fit',recommendation:'Interview market staff and verify customer requirements'})).project;
- await f.call(f.endpoint+'/generate',{mode:'findings'});assert.match(prompt.question,/2026 Q3/);assert.match(prompt.context[0].body,/Manufacturer statement/);
+ await f.call(f.endpoint+'/generate',{mode:'findings'});assert.match(prompt.question,/2026 Q3/);assert.match(prompt.question,/每条至少回答/);assert.match(prompt.question,/具体动作/);assert.match(prompt.context[0].body,/Manufacturer statement/);
  const report=await f.call(f.endpoint+'/report?skipReview=true');assert.equal(report.status,200);
  for(const text of ['2026 Q3','Industrial automation','Manufacturer statement','Interview market staff','Quarterly review','未人工审核','未启用定时调度'])assert.ok(report.markdown.includes(text),text);
  await f.restart();const saved=(await f.call(f.endpoint)).project;assert.deepEqual(saved.scope,scope);assert.equal(saved.findings[0].recommendation,p.findings[0].recommendation);

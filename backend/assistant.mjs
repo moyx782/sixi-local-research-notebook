@@ -61,7 +61,7 @@ export function createAssistant(configDir, { connection = createModelConnection(
     cfg ||= await readConfig();
     if (!cfg.apiKey) throw new AppError('还没有配置 API 密钥，请在 AI 设置中填写当前连接的 API Key。');
     const notes = context.map((note) => `【${note.type || '卡片'}】${note.title}\n${note.body}`).join('\n\n');
-    const prompt = `你是 Local Research Notebook 里的上下文 AI。只针对用户选中的卡片和文字回答，不要假设工作区其他内容。回答先作为草稿，给出清晰、可行动的建议，并指出不确定性。\n\n选中上下文：\n${notes || '（无）'}\n\n选中的文字：\n${selectedText || '（无）'}\n\n用户问题：${question}`;
+    const prompt = `你是 Local Research Notebook 里的上下文 AI。只针对用户选中的卡片和文字回答，不要假设工作区其他内容。先给直接结论和可执行动作，再用简短内容说明依据与不确定性；不要用免责声明、资料不足或建议继续研究来替代回答。\n\n选中上下文：\n${notes || '（无）'}\n\n选中的文字：\n${selectedText || '（无）'}\n\n用户问题：${question}`;
     if (cfg.protocol !== 'builtin') return connection.complete(cfg, options.test ? question : prompt, options);
     const [{ AuthStorage, createAgentSession, ModelRegistry, SessionManager }, { getModel }] =
       await Promise.all([import('@mariozechner/pi-coding-agent'), import('@mariozechner/pi-ai')]);

@@ -70,7 +70,7 @@ SIXI_SMOKE_BASE_URL=http://127.0.0.1:4173 npm run test:live
 
 以 `/api/research/projects` 创建/列出项目；`/{id}` 读取项目与关联资料。`/{id}/edit` 保存研究范围，`attach` 复用资料，`collect` 使用既有采集器，`collect-all` 一次提交一组搜索结果并复用已排队或已完成来源，`pdf` 提取上传文件文字。
 
-`/{id}/evidence` 保存精确原文与来源评估；`evidence/{evidenceId}` 确认或移除未被引用的证据。`findings` 保存有引用的发现，`review/{findingId}` 记录审核。`generate` 接受 `mode=evidence|findings`，调用既有模型适配器后再校验原文/引用。
+`/{id}/evidence` 保存精确原文与来源评估；`evidence/{evidenceId}` 确认或移除未被引用的证据。`findings` 保存有引用的发现，`review/{findingId}` 记录审核。`generate` 接受 `mode=evidence|findings`，调用既有模型适配器后再校验原文/引用；AI 输出要求先给结论，再给证据和局限，并为 Domel 提供具体动作、负责人/时间窗口及可观察指标，空结果会被拒绝而不会静默显示“生成成功”。
 
 `GET /{id}/report` 仅纳入 Keep；加 `?skipReview=true` 纳入待审核发现并逐条标注。Reject 始终排除；Investigate More 单列待调查问题。修改研究范围会将已有发现恢复待审核。
 
