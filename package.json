@@ -1,6 +1,7 @@
 {
   "name": "sixi-local-research-notebook",
   "private": true,
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
